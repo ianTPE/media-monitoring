@@ -1,0 +1,205 @@
+# 所有客戶共用的預設值。客戶檔 clients/*.yaml 裡寫的會「疊加」在這上面。
+
+# 每次 fetch 讀取人工搜尋表。可用 --workbook 改路徑，或 --no-workbook 暫停。
+# search_workbook（Excel 搜尋清單路徑）寫在只留本機的 defaults.local.yaml
+
+# 檔案怎麼分資料夾。可用變數：{client} 客戶代號、{name} 客戶名、
+# {date} 2026-09-21、{ym} 2026-09、{yyyy}、{mm}、{dd}
+# 想改回全部平放就寫 "{date}-{client}.md"；改完跑 ./monitor tidy 搬移舊檔。
+paths:
+  candidates: "{client}/{ym}/{date}-{client}.md"
+  reports: "{client}/{ym}/{date}-{client}.md"
+
+# 網域 → 報告裡要顯示的媒體名（Google News 有時只給網域或英文名）
+# 想改成客戶習慣的叫法，直接改右邊字串即可。
+media_names:
+  ctee.com.tw: 工商時報
+  chinatimes.com: 中時
+  money.udn.com: 經濟日報
+  udn.com: 聯合報
+  ec.ltn.com.tw: 自由時報
+  ltn.com.tw: 自由時報
+  cnyes.com: 鉅亨網
+  moneydj.com: MoneyDJ
+  gbimonthly.com: 環球生技
+  genetinfo.com: 環球生技
+  geneonline.news: GeneOnline
+  mirrormedia.mg: 鏡週刊          # 客戶若習慣寫「鏡新聞」就改這裡
+  mnews.tw: 鏡新聞
+  peoplenews.tw: 民報
+  ettoday.net: ETtoday
+  taisounds.com: 太報
+  rti.org.tw: 中央廣播電臺
+  cna.com.tw: 中央社
+  businesstoday.com.tw: 今周刊
+  wealth.com.tw: 財訊
+  moneyweekly.com.tw: 理財周刊
+  storm.mg: 風傳媒
+  newtalk.tw: 新頭殼
+  nownews.com: NOWnews
+  setn.com: 三立新聞網
+  tvbs.com.tw: TVBS
+  ftvnews.com.tw: 民視新聞
+  ctwant.com: CTWANT
+  technews.tw: 科技新報
+  digitimes.com.tw: DIGITIMES
+  bnext.com.tw: 數位時代
+  cw.com.tw: 天下雜誌
+  gvm.com.tw: 遠見
+  president.gov.tw: 總統府
+  money-link.com.tw: 富聯網
+  yahoo.com: Yahoo新聞
+  line.me: LINE TODAY
+  msn.com: MSN
+  ttv.com.tw: 台視
+  ftnn.com.tw: FTNN新聞網
+  life.tw: Life生活網
+  mitrade.com: Mitrade
+  mobile01.com: Mobile01
+  tmgm.com: TMGM
+  itri.org.tw: 工研院
+  flamingwheels.online: 香港風火時報
+
+# 標題出現這些字就先不收（多半是盤後數字、討論區、ETF 成分股）
+exclude_keywords:
+  - 討論牆
+  - 買超
+  - 賣超
+  - 法人動態
+  - 持股明細
+  - 成分股
+  - 三大法人
+  - 融資融券
+  - 當沖
+  - 漲停股
+  - 跌停股
+  - 質權
+  - 庫藏股
+  # Excel 搜尋清單註記：股價相關不放進新聞監測
+  - 股價
+  - 台股
+  - ETF
+  - 股票抽籤
+  - 個股
+  - 熱門股
+  - 漲停
+  - 跌停
+  - 投信
+  - 盤中
+  - 行事曆
+  - 除息
+  - 除權
+  # 股價、盤勢換句話說的寫法（2026-09-30 候選中漏網）
+  - 目標價
+  - 注意股
+  - 處置股
+  - 本益比
+  - 類股
+  - 補漲
+  - 法人喊
+  # 業配、推薦、團購類
+  - 款推薦
+  - 必買
+  - 開箱
+  - 團購
+  - 優惠碼
+  - 折扣碼
+
+# 境外媒體（台灣客戶用不到；要收特定一家就從這裡拿掉）
+exclude_domains:
+  - .hk
+  - .cn
+  - .mo
+  - sina.com
+  - sohu.com
+  - 163.com
+  - qq.com
+  - hkcd.com.hk
+  - bannedbook.org
+  # 港澳中媒體的 .com 網域（不在 .hk/.cn 底下，要個別列）
+  - hk01.com
+  - on.cc
+  - scmp.com
+  - mingpao.com
+  - hket.com
+  - stheadline.com
+  - ifeng.com
+  - sohu.com
+  - 163.com
+  - qq.com
+
+exclude_sources:
+  - pocket.tw
+  - sinotrade
+  - CMoney
+  - 股市爆料同學會
+
+# 視為轉載，報告標 (轉)
+syndicated_sources:
+  - Yahoo
+  - 富聯網
+  - LINE TODAY
+  - MSN
+  - PChome
+  - 新浪
+  - Hinet
+
+# 行情類的產業搜尋標籤（Excel 的 label）：每家每天只留一則代表
+# （公司說：我們是媒體公關，不是情報公司，2026-09-29）
+one_per_topic:
+  - 銀價
+  - 銅價
+
+# 搜尋起點：上一個上班日的這個時間（= 前一天最後一輪 07:30），平常日約 24 小時，
+# 不重複昨天信裡的新聞；週一與連假後自動涵蓋整個假期。（2026-09-30）
+window_start: "07:30"
+
+# 這些排除字遇到標題提到客戶（或其子公司）時不排除：客戶自己的股價、庫藏股等事件同仁要看
+# （2026-09-30 人工篩選時，客戶自己的跌停、股價連挫新聞都有選）；
+# 一般盤勢新聞（標題沒提到客戶）照樣排除。討論牆、行事曆、業配類不在此列，一律排除。
+exclude_unless_company:
+  - 買超
+  - 賣超
+  - 法人動態
+  - 持股明細
+  - 成分股
+  - 三大法人
+  - 融資融券
+  - 當沖
+  - 漲停股
+  - 跌停股
+  - 質權
+  - 庫藏股
+  - 股價
+  - 台股
+  - ETF
+  - 股票抽籤
+  - 個股
+  - 熱門股
+  - 漲停
+  - 跌停
+  - 投信
+  - 盤中
+  - 除息
+  - 除權
+  - 目標價
+  - 注意股
+  - 處置股
+  - 本益比
+  - 類股
+  - 補漲
+  - 法人喊
+
+# 報告裡媒體的預設排序（客戶檔可覆寫）
+source_order:          # 工商第一、經濟第二（業主指定），其餘照下列
+  - 工商時報
+  - 經濟日報
+  - 中時
+  - 聯合報
+  - 自由時報
+  - 鉅亨網
+  - MoneyDJ
+  - 今周刊
+  - 環球生技
+  - 鏡週刊
+  - 民報

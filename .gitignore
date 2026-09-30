@@ -1,0 +1,13 @@
+.env
+.state/
+__pycache__/
+bin/__pycache__/
+.claude/settings.local.json
+# 客戶資料只留本機，不上傳 GitHub（2026-09-30）
+clients/*.yaml
+!clients/_template.yaml
+candidates/
+reports/
+docs/
+.obsidian/
+defaults.local.yaml

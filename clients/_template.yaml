@@ -1,0 +1,28 @@
+# 新客戶範本：複製成 clients/<英文代號>.yaml 再改內容。
+id: example
+name: 客戶名稱
+
+queries:
+  - 客戶中文名
+  - 英文名
+  - 代表產品
+
+core_keywords:          # 判斷「這則關不關這家客戶」用的字，通常比 queries 短
+  - 公司簡稱
+
+# 產業關鍵字（選填）：不是自家新聞，但值得附在清單裡的主題，預設不勾選
+# topic_keywords:
+#   - 外泌體
+
+relevance: body         # body＝標題沒提到就看正文，正文也沒提到就不收（小型客戶建議）
+                        # title＝只看標題，沒提到的留著但取消勾選
+                        # off ＝全部收進來（要一併監測政策、產業新聞的客戶）
+
+# check_offtopic: true  # 產業新聞也預設勾選（預設只有自家新聞會勾）
+
+numbered: true          # 報告要不要 1. 2. 編號
+exclude_keywords: []
+
+# lookback_days: 1              # 預設自動算到上一個上班日
+report_title: "{name}【 {m}/{d} 新聞監測】"
+recipients: ""

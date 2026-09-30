@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# 每日新聞監測：./monitor fetch [客戶] → 手動勾選 → ./monitor build [客戶]
+set -euo pipefail
+cd "$(dirname "$0")"
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  fetch) exec uv run --quiet bin/fetch.py "$@" ;;
+  judge) exec uv run --quiet bin/subscription_judge.py "$@" ;;
+  build) exec uv run --quiet bin/build.py "$@" ;;
+  email) exec uv run --quiet bin/email_digest.py "$@" ;;
+  add)   exec uv run --quiet bin/add.py "$@" ;;
+  tidy)  exec uv run --quiet bin/tidy.py "$@" ;;
+  clients) ls clients/*.yaml | grep -v '/_' | sed 's#clients/##; s#\.yaml##' ;;
+  help|*)
+    cat <<'TXT'
+用法：
+  ./monitor fetch [客戶] [--days N] [--date YYYY-MM-DD] [--no-reporter]
+      預設也讀取 Excel 人工搜尋表；--workbook PATH 可指定新檔，--no-workbook 可暫停
+      已存在的候選檔會保留；確定要重建才加 --overwrite
+      --merge：已存在的候選檔只補進新撈到的新聞（排程第二、三輪用），人工編輯不動
+      撈候選新聞 → candidates/<客戶>/<年-月>/<日期>-<客戶>.md（在 Obsidian 裡勾選）
+  ./monitor judge [--date YYYY-MM-DD]
+      抓候選新聞短摘錄，使用 ChatGPT 訂閱登入的 Codex Luna 判讀並註記
+  ./monitor add <客戶> <網址> [網址...]
+      Google 沒撈到的新聞，貼網址自動補齊媒體／記者／標題後加進候選清單
+  ./monitor build [客戶] [--date YYYY-MM-DD]
+      排版成報告 → reports/<客戶>/<年-月>/…，更新客戶索引，並印在終端機可複製
+  ./monitor email [--date YYYY-MM-DD] [--dry-run] [--checked-only]
+      將 20 家候選標題與連結合併寄到 .env 的 MAIL_TO；先用 --dry-run 預覽
+  ./monitor tidy [客戶] [--prune-candidates N [--yes]]
+      把舊檔搬進目前的資料夾結構；N 天前的候選檔可一併清掉（預設只列出不刪）
+  ./monitor clients
+      列出目前有哪些客戶設定（clients/*.yaml）
+省略客戶＝一次跑全部客戶。
+TXT
+    ;;
+esac
