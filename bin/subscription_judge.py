@@ -89,7 +89,7 @@ def entries_for_day(day, clients):
                 "title": m.group(4), "clients": [],
             })
             note = lines[i + 1]
-            labels = re.search(r"(?:Excel|產業) 搜尋：([^，<]+)", note)
+            labels = re.search(r"(?:Excel|產業) 搜尋：([^，（<]+)", note)
             topics = labels.group(1).split("、") if labels else (cfg.get("topic_keywords") or [])
             if not any(c["id"] == cfg["id"] for c in item["clients"]):
                 item["clients"].append({"id": cfg["id"], "name": cfg["name"],
@@ -157,6 +157,7 @@ def ask_codex(binary, env, batch):
               "is_news 表示是否真的是新聞或評論文章；搜尋頁、報價頁、商品頁、目錄頁為 false。"
               "reporter 只填明確署名的人名，編譯、綜合報導、媒體名或無署名填空字串。"
               "對每個候選客戶判斷 relevant；公司本身或該客戶列出的產業主題相關才是 true。"
+              "text 為空字串表示抓不到內文，只能依標題判斷，reason 請以「依標題」開頭。"
               "reason 用不超過 15 字繁體中文說明。每篇、每個候選客戶都要有結果。"
               "只輸出符合 schema 的 JSON。\n\n候選資料：\n"
               + json.dumps(payload, ensure_ascii=False))
@@ -217,11 +218,13 @@ def valid_answers(raw, batch):
 
 def judge(articles, day):
     cache = load_state("subscription-judgments.json", {})
-    pending = [it for it in articles.values() if it["text"] and cache_key(it) not in cache]
-    missing_text = sum(not it["text"] for it in articles.values())
+    # 抓不到正文（網站擋程式、要登入）也交給 Luna 依標題判讀，免得每輪重試、永遠沒有判讀；
+    # 之後若抓到正文，快取編號含正文內容，會自動用正文重判。
+    pending = [it for it in articles.values() if cache_key(it) not in cache]
+    missing_text = sum(not it["text"] for it in pending)
     print(f"  Luna 判讀 {len(pending)} 篇新候選，其餘走快取")
     if missing_text:
-        print(f"  {missing_text} 篇抓不到正文，保留原規則並在下輪重試")
+        print(f"  {missing_text} 篇抓不到正文，改依標題判讀")
     if pending:
         binary, env = subscription_codex()
         def run_batches(items, size, label):
@@ -260,7 +263,9 @@ def judge(articles, day):
             for it in articles.values() if cache_key(it) in cache}
 
 
-def apply_judgments(locations, answers, clients):
+def apply_judgments(locations, answers, clients, title_only=frozenset()):
+    """title_only：抓不到正文、只依標題判讀的新聞。只加參考註記，不取消勾選也不擋在信外——
+    沒有內文時判斷不可靠（2026-10-02 測試中，一則人工選的 MLCC 新聞因此被判成非新聞）。"""
     by_id = {cfg["id"]: cfg for cfg in clients}
     by_path = {}
     for key, spots in locations.items():
@@ -295,9 +300,12 @@ def apply_judgments(locations, answers, clients):
             title = lines[i].rstrip("\n").split("｜", 2)[-1]
             needs_review = (verdict != "相關" and
                             keep_company_title(cfg, title, current_url.group(1)))
-            if verdict != "相關" and not needs_review:
-                lines[i] = re.sub(r"^- \[[xX]\]", "- [ ]", lines[i], count=1)
-            note = f"{AI_MARK}{verdict}"
+            if key in title_only:
+                note = f"{AI_MARK}參考（依標題）{verdict}"     # 不含「AI判讀：非新聞／不相關」，寄信不會略過
+            else:
+                if verdict != "相關" and not needs_review:
+                    lines[i] = re.sub(r"^- \[[xX]\]", "- [ ]", lines[i], count=1)
+                note = f"{AI_MARK}{verdict}"
             if needs_review:
                 note += "（請確認）"
             if reason:
@@ -348,7 +356,8 @@ def main():
     fill_excerpts(articles, today, args.workers)
     with tracing.observe(f"Luna 判讀 {day}", input={"候選篇數": len(articles)}) as run:
         answers = judge(articles, today)
-        changed = apply_judgments(locations, answers, clients)
+        title_only = {k for k, a in articles.items() if not a["text"]}
+        changed = apply_judgments(locations, answers, clients, title_only)
         if changed:
             refresh_overview(today, clients)
         tracing.update(run, output={"已註記": changed, "待重試": len(articles) - len(answers)})

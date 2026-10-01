@@ -59,6 +59,13 @@ media_names:
   tmgm.com: TMGM
   itri.org.tw: 工研院
   flamingwheels.online: 香港風火時報
+  bastillepost.com: 巴士的報
+  cmmedia.com.tw: 信傳媒
+  cryptocity.tw: 加密城市
+  facebook.com: Facebook
+  hkcd.com: 香港商報
+  news.ustv.com.tw: 非凡新聞
+  technice.com.tw: 科技島
 
 # 標題出現這些字就先不收（多半是盤後數字、討論區、ETF 成分股）
 exclude_keywords:
@@ -133,6 +140,7 @@ exclude_sources:
   - sinotrade
   - CMoney
   - 股市爆料同學會
+  - mobile01.com/marketcommodity   # Mobile01 二手拍賣頁，不是新聞
 
 # 視為轉載，報告標 (轉)
 syndicated_sources:
