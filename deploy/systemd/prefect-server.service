@@ -1,0 +1,14 @@
+[Unit]
+Description=Prefect 伺服器（本機 http://localhost:4200，每日新聞監測排程）
+After=network-online.target
+
+[Service]
+Environment=PREFECT_SERVER_ANALYTICS_ENABLED=false
+Environment=PREFECT_SERVER_API_HOST=127.0.0.1
+Environment=PREFECT_SERVER_API_PORT=4200
+ExecStart=/home/ianc/.local/bin/prefect server start --host 127.0.0.1 --port 4200
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
