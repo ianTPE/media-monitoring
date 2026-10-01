@@ -42,14 +42,23 @@ def norm_title(title):
 
 
 def parse_picks(text, clients):
-    """回傳 {客戶id: [{source, title, url}]}；無法對應的客戶名印出警告。"""
+    """回傳 ({客戶id: [{source, title, url}]}, 有出現在貼上內容的客戶id集合)。
+
+    有出現的客戶才算「審過」：沒出現的可能是別人負責，不能當成全部沒選。
+    貼上內容被擠成一行時，先在客戶標題、編號、網址前後斷行。"""
+    text = re.sub(r"\s*(https?://\S+)\s*", r"\n\1\n", text)
+    text = re.sub(r"\s*([^\s【]+【\s*\d+\s*/\s*\d+\s*新聞監測】)\s*", r"\n\1\n", text)
+    text = re.sub(r"\s+(\d{1,2}\.)(?=\S)", r"\n\1", text)
+    text = re.sub(r"\s*-{3,}\s*", "\n", text)
     names = {c["name"]: c["id"] for c in clients}
-    picks, current, recent = {}, None, []
+    picks, reviewed, current, recent = {}, set(), None, []
     for raw in text.splitlines():
         line = raw.strip()
         head = HEADER.search(line)
         if head:
             current = names.get(head.group(1))
+            if current:
+                reviewed.add(current)
             if current is None:
                 print(f"  ！認不得客戶「{head.group(1)}」，這一段略過", file=sys.stderr)
             recent = []
@@ -65,9 +74,9 @@ def parse_picks(text, clients):
                 picks[current].append({"source": source.strip(), "title": title,
                                        "url": url.group(0)})
             recent = []
-        else:
+        elif "無候選新聞" not in line:
             recent.append(line)
-    return picks
+    return picks, reviewed
 
 
 def candidates_for(cfg, day):
@@ -92,18 +101,52 @@ def find(items, url, title):
     return None
 
 
+def _api(method, path, **params):
+    """直接呼叫 Langfuse 公開 API（列出／刪除資料集項目）。"""
+    import base64, os, urllib.parse, urllib.request
+    tracing.client()            # 確保已載入 .env 的 LANGFUSE_*
+    host = os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL")
+    token = base64.b64encode(f"{os.environ['LANGFUSE_PUBLIC_KEY']}:"
+                             f"{os.environ['LANGFUSE_SECRET_KEY']}".encode()).decode()
+    url = f"{host}/api/public/{path}" + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    req = urllib.request.Request(url, method=method, headers={"Authorization": f"Basic {token}"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        body = r.read()
+    return json.loads(body) if body else {}
+
+
+def items_of_day(day):
+    out, page = [], 1
+    while True:
+        res = _api("GET", "dataset-items", datasetName=DATASET, limit=100, page=page)
+        out += [it for it in res.get("data", []) if (it.get("input") or {}).get("日期") == str(day)]
+        if page >= res.get("meta", {}).get("totalPages", 1):
+            return out
+        page += 1
+
+
 def cmd_import(args):
     day = date.fromisoformat(args.date)
     text = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
     clients = load_clients()
-    picks = parse_picks(text, clients)
-    if not picks:
-        raise SystemExit("沒有解析到任何人工篩選的新聞，請確認貼上的格式")
+    picks, reviewed = parse_picks(text, clients)
+    if not reviewed:
+        raise SystemExit("沒有解析到任何客戶的監測結果，請確認貼上的格式")
+    # 同一天可分次匯入（例如兩位同仁各審一半）：審過的客戶取聯集，這次有審的客戶以這次為準
     folder = ROOT / ".state" / "picks"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{day}.txt").write_text(text, encoding="utf-8")
-    (folder / f"{day}.json").write_text(json.dumps(picks, ensure_ascii=False, indent=1),
-                                        encoding="utf-8")
+    saved = folder / f"{day}.json"
+    old = json.loads(saved.read_text(encoding="utf-8")) if saved.exists() else {}
+    if "reviewed" not in old:                       # 舊格式：只有 picks，且當時沒記審過哪些客戶
+        old = {"reviewed": list(old), "picks": old}
+    picks = {**{k: v for k, v in old["picks"].items() if k not in reviewed}, **picks}
+    reviewed = reviewed | set(old["reviewed"]) if args.add else reviewed
+    if not args.add:
+        picks = {k: v for k, v in picks.items() if k in reviewed}
+    saved.write_text(json.dumps({"reviewed": sorted(reviewed), "picks": picks},
+                                ensure_ascii=False, indent=1), encoding="utf-8")
+    with open(folder / f"{day}.txt", "a" if args.add else "w", encoding="utf-8") as f:
+        f.write(text.rstrip() + "\n\n")
 
     lf = tracing.client()
     if lf is None:
@@ -113,8 +156,15 @@ def cmd_import(args):
     except Exception:
         lf.create_dataset(name=DATASET, description="每天同仁人工篩選的結果，當作系統判讀的標準答案")
 
+    # 這天先前匯入、但這次沒審到的客戶，舊資料刪掉（那些客戶可能是別人審的）
+    stale = [it for it in items_of_day(day) if it["input"].get("客戶代號") not in reviewed]
+    for it in stale:
+        _api("DELETE", f"dataset-items/{it['id']}")
+    if stale:
+        print(f"  刪除 {day} 未審客戶的舊資料 {len(stale)} 筆")
+
     rows, missed = [], 0
-    for cfg in clients:
+    for cfg in [c for c in clients if c["id"] in reviewed]:     # 沒出現的客戶可能是別人審的
         cands = candidates_for(cfg, day)
         chosen = picks.get(cfg["id"], [])
         if cands is None:
@@ -145,7 +195,7 @@ def cmd_import(args):
             metadata={"在系統候選中": listed})
     tracing.flush()
     n = sum(len(v) for v in picks.values())
-    print(f"  已匯入 {day}：人工選了 {n} 則（{len(picks)} 家），"
+    print(f"  已匯入 {day}：審過 {len(reviewed)} 家，人工選了 {n} 則，"
           f"資料集共寫入 {len(rows)} 筆；系統候選沒有的 {missed} 則")
 
 
@@ -209,6 +259,8 @@ def main():
     p = sub.add_parser("import", help="匯入某天的人工篩選結果")
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("file", nargs="?", help="貼上內容的檔案；省略＝從標準輸入讀")
+    p.add_argument("--replace", dest="add", action="store_false",
+                   help="這天以這次貼上的為準（預設是與這天先前匯入的合併）")
     sub.add_parser("eval", help="在 Langfuse 比對系統與人工篩選")
     args = ap.parse_args()
     {"import": cmd_import, "eval": cmd_eval}[args.cmd](args)
