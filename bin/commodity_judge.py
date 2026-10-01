@@ -6,6 +6,7 @@ import subprocess
 import sys
 from datetime import timedelta
 
+import tracing
 from common import (ROOT, article_text, fetch_page, load_state, plain_text, pmap,
                     save_state, url_key)
 
@@ -77,13 +78,23 @@ class CommodityJudge:
             command = [binary, "exec", "--ephemeral", "--ignore-user-config",
                        "--sandbox", "read-only", "--skip-git-repo-check",
                        "--model", "gpt-6-luna", "--output-schema", str(schema), "-"]
-            run = subprocess.run(command, input=prompt, cwd=ROOT / ".state", env=env,
-                                 capture_output=True, text=True, timeout=600)
-            if run.returncode:
-                raise RuntimeError((run.stderr or run.stdout).strip()[-400:])
-            chosen = json.loads(run.stdout)["selected_id"]
-            if not isinstance(chosen, str) or (chosen and chosen not in numbered):
-                raise ValueError(f"無效的 selected_id：{chosen!r}")
+            with tracing.observe(f"挑行情代表：{topic}", as_type="generation", model="gpt-6-luna",
+                                 input=prompt,
+                                 metadata={"候選": [f"{k} {it['display']}｜{it['title']}"
+                                                    for k, it in numbered.items()]}) as obs:
+                try:
+                    run = subprocess.run(command, input=prompt, cwd=ROOT / ".state", env=env,
+                                         capture_output=True, text=True, timeout=600)
+                    if run.returncode:
+                        raise RuntimeError((run.stderr or run.stdout).strip()[-400:])
+                    chosen = json.loads(run.stdout)["selected_id"]
+                    if not isinstance(chosen, str) or (chosen and chosen not in numbered):
+                        raise ValueError(f"無效的 selected_id：{chosen!r}")
+                    tracing.update(obs, output={"選中": f"{chosen} {numbered[chosen]['title']}"
+                                                if chosen else "沒有合格的行情新聞"})
+                except Exception as exc:
+                    tracing.update(obs, level="ERROR", status_message=str(exc)[:500])
+                    raise
             result = numbered[chosen]["url"] if chosen else None
             self.answers[signature] = result
             return result

@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "langfuse"]
 # ///
 """用 ChatGPT 訂閱登入的 Codex CLI 判讀當日候選，不使用 OpenAI API key。
 
@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tracing
 from common import (ROOT, article_text, fetch_page, load_clients, load_state,
                     out_path, plain_text, pmap, save_state, url_key, TPE)
 from judgment_rules import keep_company_title
@@ -161,13 +162,31 @@ def ask_codex(binary, env, batch):
     command = [binary, "exec", "--ephemeral", "--ignore-user-config",
                "--sandbox", "read-only", "--skip-git-repo-check",
                "--model", MODEL, "--output-schema", str(schema), "-"]
-    run = subprocess.run(command, input=prompt, cwd=ROOT / ".state", env=env,
-                         capture_output=True, text=True, timeout=600)
-    if run.returncode:
-        raise RuntimeError((run.stderr or run.stdout).strip()[-400:])
-    raw = json.loads(run.stdout)
-    if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
-        raise ValueError("Codex 回應沒有 items 陣列")
+    with tracing.observe("判讀一批新聞", as_type="generation", model=MODEL, input=prompt,
+                         metadata={"則數": len(batch),
+                                   "標題": [f"{it['id']} {it['title']}" for it in batch]}) as obs:
+        try:
+            run = subprocess.run(command, input=prompt, cwd=ROOT / ".state", env=env,
+                                 capture_output=True, text=True, timeout=600)
+            if run.returncode:
+                raise RuntimeError((run.stderr or run.stdout).strip()[-400:])
+            tracing.update(obs, output=run.stdout)
+            raw = json.loads(run.stdout)
+            if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+                raise ValueError("Codex 回應沒有 items 陣列")
+            answers = valid_answers(raw, batch)
+        except Exception as exc:
+            tracing.update(obs, level="ERROR", status_message=str(exc)[:500])
+            raise
+        missing = [it["id"] for it in batch if it["id"] not in answers]
+        if missing:
+            tracing.update(obs, level="WARNING",
+                           status_message=f"漏答或格式不完整：{', '.join(missing)}")
+    return answers
+
+
+def valid_answers(raw, batch):
+    """只留下格式完整的答案；漏答或欄位不對的不採用（呼叫端會重試）。"""
     requested = {it["id"]: it for it in batch}
     answers = {}
     for answer in raw["items"]:
@@ -320,10 +339,13 @@ def main():
         print("  沒有尚待判讀的候選")
         return
     fill_excerpts(articles, today, args.workers)
-    answers = judge(articles, today)
-    changed = apply_judgments(locations, answers, clients)
-    if changed:
-        refresh_overview(today, clients)
+    with tracing.observe(f"Luna 判讀 {day}", input={"候選篇數": len(articles)}) as run:
+        answers = judge(articles, today)
+        changed = apply_judgments(locations, answers, clients)
+        if changed:
+            refresh_overview(today, clients)
+        tracing.update(run, output={"已註記": changed, "待重試": len(articles) - len(answers)})
+    tracing.flush()
     print(f"  Luna 已註記 {changed} 則候選；"
           f"{len(articles) - len(answers)} 篇保留原規則待重試")
 

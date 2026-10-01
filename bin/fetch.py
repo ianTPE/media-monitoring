@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "langfuse"]
 # ///
 """撈當日候選新聞，產出可勾選的候選清單（candidates/）。
 
@@ -555,4 +555,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        import tracing
+        tracing.flush()   # 把挑行情代表的 AI 紀錄送到 Langfuse
