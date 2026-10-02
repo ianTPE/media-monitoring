@@ -3,12 +3,13 @@
 #   ./scheduled.sh first   02:00 第一輪搜尋
 #   ./scheduled.sh second  05:00 第二輪搜尋（只補新撈到的），跑完寄候選總覽信
 #   ./scheduled.sh third   07:30 第三輪搜尋，跑完再寄一次（主旨標「更新版」）
+#   ./scheduled.sh fallback 08:00 保險檢查發現當天沒寄出信時補跑（bin/watchdog.py 呼叫）
 # 紀錄寫在 .state/logs/<日期>-<輪次>.log
 set -uo pipefail
 cd "$(dirname "$0")"
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
-round="${1:?用法：./scheduled.sh first|second|third}"
+round="${1:?用法：./scheduled.sh first|second|third|fallback}"
 today="$(TZ=Asia/Taipei date +%F)"
 mkdir -p .state/logs
 exec >>".state/logs/${today}-${round}.log" 2>&1
@@ -33,7 +34,8 @@ fi
 case "$round" in
   second) ./monitor email || echo "！寄信失敗（exit $?）" ;;
   # 05:00 若沒寄成（沒有寄送紀錄），這封就是當天第一封，不加「更新版」
-  third)  if [ -e ".state/email-sent-${today}-all.json" ]; then
+  third|fallback)
+          if [ -e ".state/email-sent-${today}-all.json" ]; then
             ./monitor email --resend || echo "！寄信失敗（exit $?）"
           else
             ./monitor email || echo "！寄信失敗（exit $?）"
