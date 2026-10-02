@@ -8,7 +8,7 @@ WorkingDirectory=/home/ianc/GitHub/media-monitoring
 Environment=PREFECT_API_URL=http://127.0.0.1:4200/api
 Environment="MM_TIMES=20 2,20 5,50 7"
 # 並行測試確認後改成：MM_TIMES=0 2,0 5,30 7 與 MM_SEND_EMAIL=1，並停用 crontab
-ExecStart=/home/ianc/.local/bin/uv run --quiet --with prefect==3.8.7 --with pyyaml python bin/prefect_flow.py
+ExecStart=/home/ianc/.local/bin/uv run --quiet --with prefect==3.8.7 --with 'sqlalchemy<2.1' --with pyyaml python bin/prefect_flow.py
 Restart=on-failure
 RestartSec=30
 

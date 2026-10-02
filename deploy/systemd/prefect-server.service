@@ -1,3 +1,5 @@
+# 安裝：uv tool install 'prefect==3.8.7' --with 'sqlalchemy[asyncio]<2.1'
+# （SQLAlchemy 2.1 會讓 Prefect 3.8.7 排程服務每分鐘出錯、排不出任何一輪）
 [Unit]
 Description=Prefect 伺服器（本機 http://localhost:4200，每日新聞監測排程）
 After=network-online.target
