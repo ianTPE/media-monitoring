@@ -12,6 +12,7 @@ case "$cmd" in
   add)   exec uv run --quiet bin/add.py "$@" ;;
   watchdog) exec uv run --quiet bin/watchdog.py "$@" ;;
   tidy)  exec uv run --quiet bin/tidy.py "$@" ;;
+  rss)   exec uv run --quiet bin/rss_log.py "$@" ;;
   clients) ls clients/*.yaml | grep -v '/_' | sed 's#clients/##; s#\.yaml##' ;;
   help|*)
     cat <<'TXT'
@@ -31,6 +32,7 @@ case "$cmd" in
       將 20 家候選標題與連結合併寄到 .env 的 MAIL_TO；先用 --dry-run 預覽
   ./monitor picks import --date YYYY-MM-DD [檔案]   人工篩選結果匯入 Langfuse 當標準答案（省略檔案＝貼上）
   ./monitor picks eval     比對系統與人工篩選（召回率、過濾率），不呼叫 AI
+  ./monitor rss poll|report   試驗（到 10/11）：記錄各家 RSS，比對能補回幾則人工選的新聞
   ./monitor watchdog   上班日 08:00 保險檢查：還沒寄出候選總覽信就補跑並通知（crontab 呼叫）
   ./monitor tidy [客戶] [--prune-candidates N [--yes]]
       把舊檔搬進目前的資料夾結構；N 天前的候選檔可一併清掉（預設只列出不刪）
