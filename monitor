@@ -13,6 +13,7 @@ case "$cmd" in
   watchdog) exec uv run --quiet bin/watchdog.py "$@" ;;
   tidy)  exec uv run --quiet bin/tidy.py "$@" ;;
   rss)   exec uv run --quiet bin/rss_log.py "$@" ;;
+  propose) exec uv run --quiet bin/propose.py "$@" ;;
   clients) ls clients/*.yaml | grep -v '/_' | sed 's#clients/##; s#\.yaml##' ;;
   help|*)
     cat <<'TXT'
@@ -32,6 +33,8 @@ case "$cmd" in
       將 20 家候選標題與連結合併寄到 .env 的 MAIL_TO；先用 --dry-run 預覽
   ./monitor picks import --date YYYY-MM-DD [檔案]   人工篩選結果匯入 Langfuse 當標準答案（省略檔案＝貼上）
   ./monitor picks eval     比對系統與人工篩選（召回率、過濾率），不呼叫 AI
+  ./monitor propose [--date YYYY-MM-DD] | apply
+      漏抓分析＋AI 提新搜尋詞（picks import 後自動跑）→ candidates/_提案/；勾選的下一輪 fetch 自動加進客戶檔
   ./monitor rss poll|report   試驗（到 10/11）：記錄各家 RSS，比對能補回幾則人工選的新聞
   ./monitor watchdog   上班日 08:00 保險檢查：還沒寄出候選總覽信就補跑並通知（crontab 呼叫）
   ./monitor tidy [客戶] [--prune-candidates N [--yes]]

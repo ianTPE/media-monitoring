@@ -197,6 +197,9 @@ def cmd_import(args):
     n = sum(len(v) for v in picks.values())
     print(f"  已匯入 {day}：審過 {len(reviewed)} 家，人工選了 {n} 則，"
           f"資料集共寫入 {len(rows)} 筆；系統候選沒有的 {missed} 則")
+    if missed:      # 有漏抓就順便分析原因、請 AI 提搜尋詞，給人勾選
+        from propose import cmd_propose
+        cmd_propose(argparse.Namespace(date=str(day)))
 
 
 def task(*, item, **kwargs):

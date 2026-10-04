@@ -249,6 +249,12 @@ def main():
 
     today = (datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=TPE)
              if args.date else datetime.now(TPE))
+    # 人勾選的搜尋詞提案（candidates/_提案/）先加進客戶檔，這一輪就生效
+    try:
+        from propose import apply_approved
+        apply_approved(quiet=True)
+    except Exception as exc:
+        print(f"  ！搜尋詞提案套用失敗，這輪照舊：{exc}", file=sys.stderr)
     clients = load_clients(args.client)
     wins = {c["id"]: window(today, c, args) for c in clients}
 
