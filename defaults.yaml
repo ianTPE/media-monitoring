@@ -33,6 +33,9 @@ media_names:
   cna.com.tw: 中央社
   businesstoday.com.tw: 今周刊
   wealth.com.tw: 財訊
+  investor.com.tw: 財訊快報
+  fnc.ebc.net.tw: 東森財經新聞
+  news.ebc.net.tw: 東森新聞
   moneyweekly.com.tw: 理財周刊
   storm.mg: 風傳媒
   newtalk.tw: 新頭殼
@@ -151,6 +154,10 @@ syndicated_sources:
   - PChome
   - 新浪
   - Hinet
+  - 蕃新聞
+# 網址含這些字也算轉載（媒體名看起來是原文，其實是別家的稿）
+syndicated_urls:
+  - mirrormedia.mg/external/     # 鏡週刊轉三立
 
 # 行情類的產業搜尋標籤（Excel 的 label）：每家每天只留一則代表
 # （公司說：我們是媒體公關，不是情報公司，2026-09-29）

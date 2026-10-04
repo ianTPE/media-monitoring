@@ -19,9 +19,10 @@ from common import (ARTICLE_EXTRACT_VER, ROOT, TPE, clean_url, fetch_page,
                     resolve_url, save_state, url_key, url_rank, zh_day)
 from workbook import read_searches
 from commodity_judge import CommodityJudge
+from originals import replace_reprints
 
 
-BROAD_LIMIT = 30
+BROAD_LIMIT = 30   # 產業搜尋前幾名全收；之後的只收標題命中主題詞或公司名的
 
 
 def norm(title):
@@ -165,7 +166,7 @@ def insert_sorted(lines, block, rank, cfg):
     lines[j:j] = block if not lines[j - 1] else [""] + block
 
 
-def gather(qmap, qdays, workers, base_map, book_map):
+def gather(qmap, qdays, workers, base_map, book_map, tail_terms):
     """關鍵字去重後平行查 Google News；保留每家客戶的搜尋來源。"""
     def one(q):
         error = None
@@ -185,9 +186,16 @@ def gather(qmap, qdays, workers, base_map, book_map):
         # 指定網站搜尋（例：公司名 site:ctee.com.tw）不再要求標題有公司名：族群報導常只在
         # 內文提到客戶（2026-09-30 漏了工商〈新藥股旺到2027年〉）。這些結果走 Excel 延伸搜尋
         # 的關聯判斷，標題或內文要提到主題詞才留下，預設不勾。
-        # 產業詞（Excel／extra_searches）只取前一批，避免候選清單被泛新聞淹沒。
-        # 原本 12 則會截掉排 13～20 名的相關報導（2026-09-29 人工比對），放寬到 30。
-        items = results if q in base_map else results[:BROAD_LIMIT]
+        # 產業詞（Excel／extra_searches）只取前一批會漏：12 則截掉排 13～20 名的相關報導
+        # （2026-09-29 人工比對），30 則時 MLCC 那則排第 26 仍很險。召回優先，後面的也看，
+        # 但只留標題命中的：全收會讓還原網址多六百多則，被 Google 擋掉三百多則（2026-10-03 實測）。
+        if q in base_map:
+            items = results
+        else:
+            terms = tail_terms.get(q, ())
+            items = results[:BROAD_LIMIT] + [
+                it for it in results[BROAD_LIMIT:]
+                if any(t.lower() in it["title"].lower() for t in terms)]
         for it in items:
             raw += 1
             key = (norm(it["title"]), it["source"])
@@ -289,7 +297,11 @@ def main():
              for q, ids in qmap.items()}
 
     print(f"▶ {len(clients)} 家客戶、{len(qmap)} 組關鍵字（去重後）")
-    pool, raw, failed = gather(qmap, qdays, args.workers, base_map, book_map)
+    by_id = {c["id"]: c for c in clients}
+    tail_terms = {q: {t for cid, label in labels.items()
+                      for t in watch_terms.get((cid, label), set()) | set(core_of(by_id[cid]))}
+                  for q, labels in book_map.items()}
+    pool, raw, failed = gather(qmap, qdays, args.workers, base_map, book_map, tail_terms)
     # 少數幾組失敗（Google 偶發 404）照樣出清單，下一輪 --merge 會補回；
     # 大量失敗多半是斷網或被擋，才整輪放棄。2026-09-30 02:00 曾因 1/168 組失敗整輪沒跑。
     if failed > max(3, len(qmap) // 20):
@@ -330,6 +342,16 @@ def main():
         cutoff = wins[cfg["id"]][0]
         rows = [it for it in items if cfg["id"] in it["clients"] and keep(it, cfg, cutoff)]
         picked[cfg["id"]] = rows
+
+    # 公司規定報告只能用原始出處網址（2026-10-04）：轉載先換成原文，找不到的預設不勾
+    origcache = load_state("originals.json", {})
+    swapped, dupes, missing = replace_reprints(items, picked, clients[0], urlcache, origcache,
+                                               args.workers, today)
+    keep_after = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    save_state("originals.json", {k: v for k, v in origcache.items() if v["d"] >= keep_after})
+    save_state("urlcache.json", urlcache)
+    if swapped or dupes or missing:
+        print(f"  轉載：換成原文 {swapped} 則、原文已在清單 {dupes} 則、找不到原文 {missing} 則")
 
     rcache = load_state("reporters.json", {})
     bcache = load_state("bodyhits.json", {})
@@ -390,7 +412,8 @@ def main():
         cutoff, note = wins[cfg["id"]]
         rows = picked[cfg["id"]]
         for it in rows:
-            it["display"] = pretty_source(it["source"], it["url"], cfg.get("media_names"))
+            it["display"] = (it.get("source_name")
+                             or pretty_source(it["source"], it["url"], cfg.get("media_names")))
         rows = sorted(rows, key=lambda r: sort_key(r, cfg))
         sent = load_state(f"sent-{cfg['id']}.json", {})
         sent_keys = {url_key(u): d for u, d in sent.items()}
@@ -398,7 +421,6 @@ def main():
         core_prefix = cfg.get("allow_core_prefix", True)
         topics = topics_of(cfg)
         mode = relevance_of(cfg)
-        syn = cfg.get("syndicated_sources") or []
         dropped = 0
 
         out = out_path("candidates", cfg, today, make_dir=True)
@@ -461,7 +483,7 @@ def main():
                     continue
                 else:
                     why = "標題未提到關鍵字"
-            src = it["display"] + (" (轉)" if any(s in it["source"] for s in syn) else "")
+            src = it["display"] + (" (轉)" if it.get("reprint") else "")
             if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", it["display"] or ""):
                 unmapped.add(it["display"])
             stamp = f"{it['when']:%m/%d %H:%M}"
@@ -475,6 +497,11 @@ def main():
                     mark, note2 = " ", f"  <!-- {stamp}｜{why}，確認後再勾 -->"
             else:
                 mark, note2 = "x", f"  <!-- {stamp} -->"
+            if it.get("no_original"):
+                mark = " "
+                note2 = re.sub(r"(，確認後再勾)? -->$", "｜轉載，找不到原文網址，勿直接用 -->", note2)
+            elif it.get("via"):
+                note2 = note2.replace(" -->", f"｜原為{it['via']}轉載，已換原文 -->")
             who = rcache.get(it["url"], {}).get("n", "")
             entry = (url_key(it["url"]), mark, source_rank(src, cfg), [
                 f"- [{mark}] {src}｜{who}｜{it['title']}", f"  {it['url']}{note2}", ""])

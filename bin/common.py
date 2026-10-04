@@ -114,7 +114,7 @@ _BATCH = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
 
 
 def resolve_url(gurl, cache):
-    if gurl in cache:
+    if cache.get(gurl, gurl) != gurl:   # 舊版會把失敗也寫進快取，這種當作沒快取
         return cache[gurl]
     real = gurl
     try:
@@ -140,7 +140,8 @@ def resolve_url(gurl, cache):
             real = real.replace("\\u003d", "=").replace("\\u0026", "&")
     except Exception:
         pass
-    cache[gurl] = real
+    if real != gurl:      # 失敗（多半是被 Google 暫時擋）不寫快取，下一輪再試
+        cache[gurl] = real
     return real
 
 
