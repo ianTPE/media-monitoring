@@ -21,8 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tracing
-from common import (ROOT, article_text, fetch_page, load_clients, load_state,
-                    out_path, plain_text, pmap, save_state, url_key, TPE)
+from common import (ARTICLE_EXTRACT_VER, ROOT, article_text, fetch_page, load_clients,
+                    load_state, out_path, plain_text, pmap, save_state, url_key, TPE)
 from judgment_rules import keep_company_title
 
 MODEL = "gpt-6-luna"
@@ -109,13 +109,14 @@ def excerpt(page):
 
 def fill_excerpts(articles, day, workers):
     cache = load_state("article-excerpts.json", {})
-    missing = [it for it in articles.values() if it["id"] not in cache]
+    missing = [it for it in articles.values()
+               if cache.get(it["id"], {}).get("v") != ARTICLE_EXTRACT_VER]
     if missing:
         print(f"  抓取 {len(missing)} 篇新聞摘錄…")
         for it, page in zip(missing, pmap(lambda x: fetch_page(x["url"]), missing, workers)):
             extracted = excerpt(page)
             if extracted["text"]:
-                cache[it["id"]] = {**extracted, "d": str(day.date())}
+                cache[it["id"]] = {**extracted, "d": str(day.date()), "v": ARTICLE_EXTRACT_VER}
         keep_after = str(day.date() - timedelta(days=30))
         save_state("article-excerpts.json",
                    {k: v for k, v in cache.items() if v.get("d", "") >= keep_after})

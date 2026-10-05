@@ -7,8 +7,8 @@ import sys
 from datetime import timedelta
 
 import tracing
-from common import (ROOT, article_text, fetch_page, load_state, plain_text, pmap,
-                    save_state, url_key)
+from common import (ARTICLE_EXTRACT_VER, ROOT, article_text, fetch_page, load_state,
+                    plain_text, pmap, save_state, url_key)
 
 
 SCHEMA = {
@@ -30,7 +30,8 @@ class CommodityJudge:
         self.codex = None
 
     def _texts(self, candidates):
-        missing = [it for it in candidates if url_key(it["url"]) not in self.excerpts]
+        missing = [it for it in candidates
+                   if self.excerpts.get(url_key(it["url"]), {}).get("v") != ARTICLE_EXTRACT_VER]
         if missing:
             for it, page in zip(missing, pmap(lambda x: fetch_page(x["url"]),
                                              missing, self.workers)):
@@ -41,7 +42,7 @@ class CommodityJudge:
                     self.excerpts[url_key(it["url"])] = {
                         "text": body,
                         "clues": "｜".join(dict.fromkeys(c.strip() for c in clues))[:350],
-                        "d": str(self.day.date())}
+                        "d": str(self.day.date()), "v": ARTICLE_EXTRACT_VER}
             keep_after = str(self.day.date() - timedelta(days=30))
             save_state("article-excerpts.json", {
                 k: v for k, v in self.excerpts.items()

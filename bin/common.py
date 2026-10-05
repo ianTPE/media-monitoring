@@ -252,7 +252,7 @@ def plain_text(page, limit=40000):
     return re.sub(r"\s+", " ", text)[:limit]
 
 
-ARTICLE_EXTRACT_VER = "p4"   # 抓正文的方式改版時要跟著改，內文比對快取才會失效
+ARTICLE_EXTRACT_VER = "p5"   # 抓正文的方式改版時要跟著改，內文比對快取才會失效
 
 
 def _drop_card_links(html):
@@ -267,10 +267,30 @@ def _drop_card_links(html):
     return "".join(out)
 
 
+def _strip_tags(x):
+    return re.sub(r"\s+", " ", htmllib.unescape(re.sub(r"<[^>]+>", " ", x))).strip()
+
+
+def _paragraphs(html):
+    paras = []
+    for chunk in re.findall(r"(?is)<p[^>]*>(.*?)</p>", html):
+        text = _strip_tags(chunk)
+        if not text:
+            continue
+        # 「推薦新聞」「延伸閱讀」那種整串都是連結的段落不算正文
+        linked = sum(len(_strip_tags(a)) for a in re.findall(r"(?is)<a[^>]*>(.*?)</a>", chunk))
+        if linked / len(text) > 0.6:
+            continue
+        paras.append(text)
+    return paras
+
+
 def article_text(page, limit=40000):
     """只取文章正文，避免比對到側欄的「相關新聞」而誤判。
 
-    優先用 JSON-LD 的 articleBody，沒有就取所有 <p> 段落；段落太少（可能不是
+    優先用 JSON-LD 的 articleBody，沒有就取 <p> 段落；頁面有 <article> 且全頁最長的
+    段落在裡面，就只取 <article> 裡的（Yahoo 正文後的「其他人也在看」、各站頁尾都在
+    外面；mnews 把一篇拆成好幾個 <article>，所以全部合併）。段落太少（可能不是
     文章頁或用了別的標記）才退回整頁純文字。
     """
     m = re.search(r'"articleBody"\s*:\s*("(?:[^"\\]|\\.)*")', page, re.S)
@@ -281,19 +301,14 @@ def article_text(page, limit=40000):
             pass
     page_nb = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", page)
     page_nb = _drop_card_links(page_nb)
-    strip = lambda x: re.sub(r"\s+", " ", htmllib.unescape(re.sub(r"<[^>]+>", " ", x))).strip()
-    paras = []
-    for chunk in re.findall(r"(?is)<p[^>]*>(.*?)</p>", page_nb):
-        text = strip(chunk)
-        if not text:
-            continue
-        # 「推薦新聞」「延伸閱讀」那種整串都是連結的段落不算正文
-        linked = sum(len(strip(a)) for a in re.findall(r"(?is)<a[^>]*>(.*?)</a>", chunk))
-        if linked / len(text) > 0.6:
-            continue
-        paras.append(text)
+    paras = _paragraphs(page_nb)
+    if paras:
+        inside = _paragraphs(" ".join(re.findall(r"(?is)<article\b[^>]*>(.*?)</article>", page_nb)))
+        if max(paras, key=len) in inside and sum(map(len, inside)) >= 200:
+            paras = inside
     text = " ".join(paras)
-    for marker in ("延伸閱讀", "推薦閱讀", "更多新聞", "相關新聞", "熱門新聞", "看更多"):
+    for marker in ("延伸閱讀", "推薦閱讀", "更多新聞", "相關新聞", "熱門新聞", "看更多",
+                   "其他人也在看", "檢視留言", "登入後即可張貼留言", "熱門留言"):
         i = text.find(marker)
         if i > 200:
             text = text[:i]
