@@ -11,9 +11,10 @@
   3. 平行：前置檢查用 .submit() 同時送出三個 task，介面時間軸上會疊在一起
   4. 狀態：return_state=True 拿到 State 自己判斷，失敗不讓整輪中止
   5. Artifacts：每輪留一張「各客戶則數」表和一份摘要，Artifacts 頁可按日期翻歷史
-  6. Events：寄信成功／失敗、搜尋失敗都發事件，Events 頁看得到；之後可用
-     Automations 設「收到某事件就做某事」（例如寄信失敗就通知）
+  6. Events：寄信成功／失敗、搜尋失敗都發事件，Events 頁看得到
   7. 自訂執行名稱：每輪叫「10/05 第二輪」而不是隨機的 loud-corgi
+  8. Automations：「寄信失敗就通知」收到寄信失敗事件，就跑「寄信失敗通知」流程寄警告給
+     ALERT_TO；同一個服務同時提供兩個 deployment（排程、通知）
 
 環境變數（寫在 systemd 服務檔）：
   MM_SEND_EMAIL=1        真的寄信；未設＝只產生寄信預覽
@@ -168,7 +169,7 @@ def event(name, day, round, **payload):
     emit_event(event=f"media-monitoring.{name}",
                resource={"prefect.resource.id": f"media-monitoring.digest.{day}",
                          "prefect.resource.name": f"{day} 候選總覽"},
-               payload={"round": round, **payload})
+               payload={"day": str(day), "round": round, **payload})
 
 
 @flow(name="每日新聞監測", flow_run_name=run_name, log_prints=True)
@@ -216,7 +217,7 @@ def daily(round: str, send_email: bool = False):
                 event("email.sent", day, round, resend=resend)
         else:
             notes.append("寄信失敗；08:00 保險檢查會補寄")
-            event("email.failed", day, round)
+            event("email.failed", day, round, error=(state.message or state.name)[:500], prefix="")
 
     summarize(day, round, fetch_lines, email_lines, notes)
     if round in ("second", "third") and not email_lines:
@@ -224,13 +225,72 @@ def daily(round: str, send_email: bool = False):
     return "完成" if not notes else "完成（有提醒）"
 
 
+# ── 學習點 8：Automation＝「收到某事件 → 做某事」。這裡是「寄信失敗 → 跑通知流程」──
+# Prefect 內建的通知只有 Slack、Discord、Sendgrid 這類，沒有一般 SMTP，
+# 所以讓 Automation 觸發下面這個小流程，用 .env 既有的寄信設定寄警告。
+
+@flow(name="寄信失敗通知",
+      flow_run_name=lambda: f"通知：{flow_run.parameters.get('day')} "
+                            f"{ROUND_NAMES.get(flow_run.parameters.get('round'), '')}")
+def notify_email_failed(day: str, round: str, error: str = "", prefix: str = ""):
+    # 參數都用字串：Automation 用 Jinja 樣板帶參數，算出來一律是字串
+    from email_digest import read_env, send
+    settings = read_env(ROOT / ".env")
+    alert_to = settings.get("ALERT_TO") or settings["MAIL_TO"].split(",")[0].strip()
+    path = ROOT / ".state" / "logs" / f"{day}-{round}.log"
+    tail = (path.read_text(encoding="utf-8").splitlines()[-20:] if path.exists()
+            else ["（沒有紀錄檔）"])
+    subject = f"{prefix}【新聞監測警告】{day} {ROUND_NAMES.get(round, round)}寄信失敗"
+    body = "\n".join([
+        f"{day} {ROUND_NAMES.get(round, round)}的候選總覽信重試後仍然寄不出去。",
+        f"錯誤：{error or '（沒有訊息）'}",
+        "",
+        "08:00 保險檢查會再用舊方法補寄一次；若寄信伺服器本身故障，這封通知也可能寄不到。",
+        "Prefect 介面：http://localhost:4200",
+        "",
+        f"── {path.name}（最後 20 行）──",
+        *tail,
+    ])
+    send(subject, body, {**settings, "MAIL_TO": alert_to})
+    get_run_logger().info("已通知 %s", alert_to)
+
+
+AUTOMATION = "寄信失敗就通知"
+
+
+def ensure_automation(notify_id):
+    """每次服務啟動都重建一次，設定以程式碼為準（介面上改的會被覆蓋）。"""
+    from prefect.automations import Automation, EventTrigger, Posture, RunDeployment
+    try:
+        Automation.read(name=AUTOMATION).delete()
+    except ValueError:
+        pass
+    jinja = lambda field: {"__prefect_kind": "jinja", "template": "{{ event.payload.%s }}" % field}
+    Automation(
+        name=AUTOMATION,
+        description="收到 media-monitoring.email.failed 事件就跑「寄信失敗通知」流程",
+        trigger=EventTrigger(
+            expect={"media-monitoring.email.failed"},
+            match={"prefect.resource.id": "media-monitoring.digest.*"},
+            posture=Posture.Reactive, threshold=1, within=0),
+        actions=[RunDeployment(
+            source="selected", deployment_id=notify_id,
+            parameters={"day": jinja("day"), "round": jinja("round"),
+                        "error": jinja("error"), "prefix": jinja("prefix")})],
+    ).create()
+
+
 if __name__ == "__main__":
+    from prefect import serve
     send = os.environ.get("MM_SEND_EMAIL") == "1"
     times = (os.environ.get("MM_TIMES") or "0 2,0 5,30 7").split(",")
     rounds = ["first", "second", "third"]
-    daily.serve(
+    schedule = daily.to_deployment(
         name="排程",
         tags=["新聞監測"],
         schedules=[Cron(f"{t.strip()} * * *", timezone="Asia/Taipei", slug=r,
                         parameters={"round": r, "send_email": send})
                    for r, t in zip(rounds, times)])
+    notify = notify_email_failed.to_deployment(name="通知", tags=["新聞監測"])
+    ensure_automation(notify.apply())
+    serve(schedule, notify)
