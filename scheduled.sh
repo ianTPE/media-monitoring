@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 排程用（crontab 呼叫）：只在台灣上班日執行（國定假日跳過、補班日照跑）。
+# 舊的排程腳本：只在台灣上班日執行（國定假日跳過、補班日照跑）。
+# 2026-10-05 起三輪改由 Prefect（bin/prefect_flow.py）跑；現在只剩 08:00 保險檢查用 fallback。
+# 要退回 crontab：把 .state/crontab-before-prefect-2026-10-05.bak 裡的三行加回 crontab。
 #   ./scheduled.sh first   02:00 第一輪搜尋
 #   ./scheduled.sh second  05:00 第二輪搜尋（只補新撈到的），跑完寄候選總覽信
 #   ./scheduled.sh third   07:30 第三輪搜尋，跑完再寄一次（主旨標「更新版」）
