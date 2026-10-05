@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml", "langfuse"]
 # ///
-"""AI 提案、人核准：從人工挑選找出系統漏抓的新聞，分類原因，請 Luna 提新的搜尋詞。
+"""AI 提案、人核准：從人工挑選找出系統漏抓的新聞，分類原因，請 Sol 提新的搜尋詞。
 
   ./monitor propose [--date YYYY-MM-DD]   產生提案（picks import 匯入後會自動跑）
   ./monitor propose apply                 套用已勾選的提案（fetch 每輪開始時也會自動跑）
@@ -14,7 +14,7 @@
 漏抓分三類，只有「搜尋沒涵蓋」請 AI 提案；「時間差」「被規則濾掉」列給人看，不自動改：
   時間差        刊出時間晚於當天最後一輪
   被規則濾掉    Google 有回傳、也提到這家客戶，但被排除詞／網域／關聯度擋掉
-  搜尋沒涵蓋    這家客戶的搜尋沒撈到 → Luna 提搜尋詞，每個提案都實際試搜一次
+  搜尋沒涵蓋    這家客戶的搜尋沒撈到 → Sol 提搜尋詞，每個提案都實際試搜一次
 """
 
 import argparse
@@ -128,7 +128,12 @@ def diagnose(cfg, day, pick, page, returned, bodyhits, seen_day):
     return "搜尋沒涵蓋", ""
 
 
-# ---- 請 Luna 提搜尋詞 ----
+# ---- 請 Sol 提搜尋詞 ----
+# 2026-10-05 比較 Luna、Sol、Gemini 3.8 Flash、Sonnet 5.5（9/29、9/30 漏抓各跑兩次）：
+# Luna 會以「現有搜尋詞已涵蓋」錯誤略過、找回 2～3/5；Sol 兩次都 4/5（剩下那則 Google News
+# 沒收錄），提的詞也較寬、較能撈到以後的同類新聞。提案一天一次、量小，用較強的模型划算。
+# 每輪的判讀量大、題目簡單，仍用 Luna（subscription_judge.py）。
+MODEL = "gpt-6.1-sol"
 
 def excel_labels(cfg):
     try:
@@ -145,7 +150,7 @@ def excel_labels(cfg):
     return []
 
 
-def ask_luna(day, misses):
+def ask_model(day, misses):
     from subscription_judge import subscription_codex
     binary, env = subscription_codex()
     payload = [{"id": m["id"], "客戶": m["cfg"]["name"],
@@ -169,8 +174,9 @@ def ask_luna(day, misses):
     schema = ROOT / ".state" / "propose-schema.json"
     schema.write_text(json.dumps(SCHEMA, ensure_ascii=False), encoding="utf-8")
     command = [binary, "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
-               "--skip-git-repo-check", "--model", "gpt-6-luna", "--output-schema", str(schema), "-"]
-    with tracing.observe(f"搜尋詞提案 {day}", as_type="generation", model="gpt-6-luna",
+               "--skip-git-repo-check", "--model", MODEL, "-c", 'model_reasoning_effort="medium"',
+               "--output-schema", str(schema), "-"]
+    with tracing.observe(f"搜尋詞提案 {day}", as_type="generation", model=MODEL,
                          input=prompt) as obs:
         try:
             run = subprocess.run(command, input=prompt, cwd=ROOT / ".state", env=env,
@@ -238,18 +244,20 @@ def cmd_propose(args):
     answers = {}
     if uncovered:
         try:
-            answers = ask_luna(day, uncovered)
+            answers = ask_model(day, uncovered)
         except Exception as exc:
-            print(f"  ！Luna 提案失敗，只列漏抓原因：{exc}", file=sys.stderr)
+            print(f"  ！Sol 提案失敗，只列漏抓原因：{exc}", file=sys.stderr)
 
     # 重新產生時保留已勾選的
     path = proposal_path(day)
-    checked = set()
+    checked = {}     # (客戶, 搜尋詞) → 原本的勾選行與說明行
     if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
+        old = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(old):
             m = LINE.match(line)
             if m and m.group(1) in "xX":
-                checked.add((m.group(2), m.group(4).split("  <!--")[0]))
+                detail = old[i + 1:i + 2] if i + 1 < len(old) and old[i + 1].startswith("  ") else []
+                checked[(m.group(2), m.group(4).split("  <!--")[0])] = [line, *detail]
 
     lines = [f"# {day} 漏抓分析與搜尋詞提案", "",
              f"人工選了 {total} 則，系統候選有 {total - len(misses)} 則，漏了 {len(misses)} 則。", "",
@@ -272,10 +280,15 @@ def cmd_propose(args):
             lines += [f"- [{mark}] {m['cfg']['name']}｜{q['label'].strip()}｜{query}",
                       f"  {q['why']}｜{trial(query, m['pick'], day)}｜{head}"]
             n_prop += 1
+    # 已勾選、這次模型沒再提出的不能丟：可能還沒到下一輪套用
+    kept = [v for (name, query), v in checked.items()
+            if not any(l.startswith(f"- [x] {name}｜") and l.endswith(f"｜{query}") for l in lines)]
+    if kept:
+        lines += ["", "### 先前勾選（這次沒再提出，保留）", ""] + [l for v in kept for l in v]
     if not uncovered:
         lines += ["（這天沒有「搜尋沒涵蓋」的漏抓）"]
     elif not answers:
-        lines += ["（Luna 提案失敗，見下方漏抓清單）"]
+        lines += ["（Sol 提案失敗，見下方漏抓清單）"]
     lines += ["", "## 漏抓原因", ""]
     for kind in ("搜尋沒涵蓋", "時間差", "被規則濾掉"):
         group = [m for m in misses if m["kind"] == kind]
