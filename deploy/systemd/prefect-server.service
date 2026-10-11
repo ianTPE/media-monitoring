@@ -8,7 +8,7 @@ After=network-online.target
 Environment=PREFECT_SERVER_ANALYTICS_ENABLED=false
 Environment=PREFECT_SERVER_API_HOST=127.0.0.1
 Environment=PREFECT_SERVER_API_PORT=4200
-ExecStart=/home/ianc/.local/bin/prefect server start --host 127.0.0.1 --port 4200
+ExecStart=%h/.local/bin/prefect server start --host 127.0.0.1 --port 4200
 Restart=on-failure
 RestartSec=10
 
